@@ -1,25 +1,30 @@
-import React, { useState } from 'react';
-import { ArrowLeft, CheckCircle2, Shield, Smartphone, Cpu, ArrowUpCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ArrowLeft, CheckCircle2, Shield, Smartphone, Cpu, ArrowUpCircle, Download, ExternalLink } from 'lucide-react';
+import { AppUpdateCheckResult, checkForAppUpdate, getCurrentAppVersion } from '../utils/updateChecker';
+import { DEFAULT_APP_METADATA } from '../utils/appConfig';
 
 interface AboutViewProps {
   onBack: () => void;
+  onOpenDownload?: () => void;
+  updateInfo?: AppUpdateCheckResult | null;
 }
 
-// Extensible Update Information Interface for future remote update source configuration
-export interface AppUpdateInfo {
-  isUpdateAvailable: boolean;
-  version?: string;
-  releaseNotes?: string;
-  downloadUrl?: string;
-}
+export const AboutView: React.FC<AboutViewProps> = ({ onBack, onOpenDownload, updateInfo: initialUpdateInfo }) => {
+  const [appVersion, setAppVersion] = useState<string>(DEFAULT_APP_METADATA.version);
+  const [updateResult, setUpdateResult] = useState<AppUpdateCheckResult | null>(initialUpdateInfo || null);
 
-export const AboutView: React.FC<AboutViewProps> = ({ onBack }) => {
-  const APP_VERSION = '1.0.0';
-
-  // Extensible update state: ONLY shows update option when an update is actually available
-  const [updateInfo] = useState<AppUpdateInfo>({
-    isUpdateAvailable: false,
-  });
+  useEffect(() => {
+    getCurrentAppVersion().then(setAppVersion);
+    if (!initialUpdateInfo) {
+      checkForAppUpdate()
+        .then((res) => {
+          if (res.hasUpdate) {
+            setUpdateResult(res);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [initialUpdateInfo]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -61,7 +66,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onBack }) => {
               Body Analysis & Nutrition System
             </p>
             <span className="inline-block mt-2 px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200/60">
-              आवृत्ती (Version): v{APP_VERSION}
+              आवृत्ती (Version): v{appVersion}
             </span>
           </div>
 
@@ -71,7 +76,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onBack }) => {
         </div>
 
         {/* Update Option ONLY rendered when an update is actually available */}
-        {updateInfo.isUpdateAvailable ? (
+        {updateResult?.hasUpdate ? (
           <div className="bg-emerald-50 border border-emerald-200 rounded-3xl p-5 shadow-sm space-y-3">
             <div className="flex items-center gap-3">
               <div className="p-2.5 rounded-2xl bg-emerald-600 text-white shadow-xs">
@@ -79,18 +84,21 @@ export const AboutView: React.FC<AboutViewProps> = ({ onBack }) => {
               </div>
               <div className="flex-1">
                 <h3 className="text-sm font-extrabold text-emerald-950">
-                  नवीन अपडेट उपलब्ध आहे ({updateInfo.version || 'New Version'})
+                  नवीन अपडेट उपलब्ध आहे (v{updateResult.latestVersion})
                 </h3>
                 <p className="text-xs text-emerald-700 font-medium">
-                  {updateInfo.releaseNotes || 'नवीन सुधारणा आणि कार्यक्षमता उपलब्ध.'}
+                  {updateResult.releaseNotes || 'नवीन सुधारणा आणि कार्यक्षमता उपलब्ध.'}
                 </p>
               </div>
             </div>
 
             <a
-              href={updateInfo.downloadUrl || '#'}
+              href={updateResult.apkDownloadUrl || updateResult.releaseUrl}
+              target="_blank"
+              rel="noopener noreferrer"
               className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs sm:text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-xs"
             >
+              <Download className="w-4 h-4" />
               <span>आता अपडेट करा (Update Now)</span>
             </a>
           </div>
@@ -104,11 +112,37 @@ export const AboutView: React.FC<AboutViewProps> = ({ onBack }) => {
                 ॲप अद्ययावत आहे (App is up to date)
               </span>
               <span className="text-[11px] text-slate-400 font-medium">
-                सध्याची स्थापित आवृत्ती: v{APP_VERSION}
+                सध्याची स्थापित आवृत्ती: v{appVersion}
               </span>
             </div>
           </div>
         )}
+
+        {/* Download Page Shortcut */}
+        <div className="bg-white rounded-3xl p-4 border border-slate-200/80 shadow-2xs">
+          <button
+            type="button"
+            onClick={() => {
+              if (onOpenDownload) {
+                onOpenDownload();
+              } else if (typeof window !== 'undefined') {
+                window.location.href = '/download';
+              }
+            }}
+            className="w-full py-3 px-4 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 text-emerald-900 font-extrabold text-xs sm:text-sm rounded-2xl transition flex items-center justify-between border border-emerald-200/80"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-emerald-600 text-white shadow-2xs">
+                <Download className="w-4 h-4" />
+              </div>
+              <div className="text-left">
+                <span className="block font-extrabold">अधिकृत डाउनलोड पृष्ठ (Download Page)</span>
+                <span className="text-[11px] text-emerald-700 font-medium">APK डाउनलोड व शेअरिंग QR कोड पहा</span>
+              </div>
+            </div>
+            <ExternalLink className="w-4 h-4 text-emerald-700" />
+          </button>
+        </div>
 
         {/* Features List */}
         <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-sm space-y-3">
