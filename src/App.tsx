@@ -14,7 +14,31 @@ import { ReportsListView } from './components/ReportsListView';
 import { ContactUsView } from './components/ContactUsView';
 import { AboutView } from './components/AboutView';
 import { SharedReportView } from './components/SharedReportView';
+import { DownloadAppView } from './components/DownloadAppView';
+import { UpdateModal } from './components/UpdateModal';
+import { checkForAppUpdate, AppUpdateCheckResult } from './utils/updateChecker';
 import { PenLine, Eye, ArrowLeft, AlertCircle } from 'lucide-react';
+
+const getAppBasePath = (): string => {
+  const metaEnv = typeof import.meta !== 'undefined' ? (import.meta as any).env : undefined;
+  const base = metaEnv?.BASE_URL || '/';
+  return base.endsWith('/') ? base : `${base}/`;
+};
+
+const isDownloadRoute = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const path = window.location.pathname.toLowerCase();
+  const hash = window.location.hash.toLowerCase();
+  const search = new URLSearchParams(window.location.search);
+  return (
+    path.endsWith('/download') ||
+    path.endsWith('/download/') ||
+    path.includes('/download') ||
+    hash.includes('/download') ||
+    hash.includes('download') ||
+    search.get('view') === 'download'
+  );
+};
 
 const getInitialReportData = (): ReportData => {
   const today = new Date();
@@ -50,11 +74,14 @@ const getInitialReportData = (): ReportData => {
   };
 };
 
-type AppView = 'home' | 'report' | 'reports' | 'contact' | 'about';
+type AppView = 'home' | 'report' | 'reports' | 'contact' | 'about' | 'download';
 type ReportMode = 'form' | 'preview';
 
 export const App: React.FC = () => {
-  const [currentView, setCurrentView] = useState<AppView>('home');
+  const [currentView, setCurrentView] = useState<AppView>(() => {
+    if (isDownloadRoute()) return 'download';
+    return 'home';
+  });
   const [reportMode, setReportMode] = useState<ReportMode>('form');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [totalSavedReports, setTotalSavedReports] = useState(0);
@@ -70,9 +97,27 @@ export const App: React.FC = () => {
   const [isLoadingShared, setIsLoadingShared] = useState(false);
   const [sharedError, setSharedError] = useState<string | null>(null);
 
+  // In-app update checker state
+  const [updateInfo, setUpdateInfo] = useState<AppUpdateCheckResult | null>(null);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+
   // Preload PDF generation assets on app launch for maximum generation speed
   useEffect(() => {
     preloadPdfAssets();
+  }, []);
+
+  // Silently check for GitHub app updates on startup
+  useEffect(() => {
+    checkForAppUpdate()
+      .then((res) => {
+        if (res && res.hasUpdate) {
+          setUpdateInfo(res);
+          setIsUpdateModalOpen(true);
+        }
+      })
+      .catch(() => {
+        // Silently handle any network / offline issues
+      });
   }, []);
 
   // Refresh saved reports count
@@ -89,6 +134,24 @@ export const App: React.FC = () => {
     refreshReportsCount();
   }, [currentView]);
 
+  // Listen to browser back/forward buttons and hash navigation
+  useEffect(() => {
+    const handleLocationChange = () => {
+      if (isDownloadRoute()) {
+        setCurrentView('download');
+      } else if (currentView === 'download' && !isDownloadRoute()) {
+        setCurrentView('home');
+      }
+    };
+
+    window.addEventListener('popstate', handleLocationChange);
+    window.addEventListener('hashchange', handleLocationChange);
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('hashchange', handleLocationChange);
+    };
+  }, [currentView]);
+
   // Handle native Android hardware back button
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
@@ -97,9 +160,12 @@ export const App: React.FC = () => {
           setIsDrawerOpen(false);
         } else if (sharedData) {
           setSharedData(null);
-          window.history.pushState({}, '', '/');
+          window.history.pushState({}, '', getAppBasePath());
         } else if (currentView !== 'home') {
           setCurrentView('home');
+          if (window.location.pathname.toLowerCase().includes('download')) {
+            window.history.pushState({}, '', getAppBasePath());
+          }
         } else if (canGoBack) {
           window.history.back();
         } else {
@@ -234,17 +300,68 @@ export const App: React.FC = () => {
   }
 
   // =========================================================================
-  // 2. CONTACT US VIEW
+  // 2. DOWNLOAD APP VIEW (/download)
   // =========================================================================
-  if (currentView === 'contact') {
-    return <ContactUsView onBack={() => setCurrentView('home')} />;
+  if (currentView === 'download') {
+    return (
+      <>
+        <DownloadAppView
+          onBack={() => {
+            setCurrentView('home');
+            if (typeof window !== 'undefined' && window.location.pathname.toLowerCase().includes('download')) {
+              window.history.pushState({}, '', getAppBasePath());
+            }
+          }}
+        />
+        <UpdateModal
+          updateInfo={updateInfo}
+          isOpen={isUpdateModalOpen}
+          onClose={() => setIsUpdateModalOpen(false)}
+        />
+      </>
+    );
   }
 
   // =========================================================================
-  // 3. ABOUT VIEW
+  // 3. CONTACT US VIEW
+  // =========================================================================
+  if (currentView === 'contact') {
+    return (
+      <>
+        <ContactUsView onBack={() => setCurrentView('home')} />
+        <UpdateModal
+          updateInfo={updateInfo}
+          isOpen={isUpdateModalOpen}
+          onClose={() => setIsUpdateModalOpen(false)}
+        />
+      </>
+    );
+  }
+
+  // =========================================================================
+  // 4. ABOUT VIEW
   // =========================================================================
   if (currentView === 'about') {
-    return <AboutView onBack={() => setCurrentView('home')} />;
+    return (
+      <>
+        <AboutView
+          onBack={() => setCurrentView('home')}
+          updateInfo={updateInfo}
+          onOpenDownload={() => {
+            setCurrentView('download');
+            if (typeof window !== 'undefined') {
+              const base = getAppBasePath().replace(/\/$/, '');
+              window.history.pushState({}, '', `${base}/download`);
+            }
+          }}
+        />
+        <UpdateModal
+          updateInfo={updateInfo}
+          isOpen={isUpdateModalOpen}
+          onClose={() => setIsUpdateModalOpen(false)}
+        />
+      </>
+    );
   }
 
   // =========================================================================
@@ -252,10 +369,17 @@ export const App: React.FC = () => {
   // =========================================================================
   if (currentView === 'reports') {
     return (
-      <ReportsListView
-        onBack={() => setCurrentView('home')}
-        onEditReport={handleEditReport}
-      />
+      <>
+        <ReportsListView
+          onBack={() => setCurrentView('home')}
+          onEditReport={handleEditReport}
+        />
+        <UpdateModal
+          updateInfo={updateInfo}
+          isOpen={isUpdateModalOpen}
+          onClose={() => setIsUpdateModalOpen(false)}
+        />
+      </>
     );
   }
 
@@ -264,87 +388,95 @@ export const App: React.FC = () => {
   // =========================================================================
   if (currentView === 'report') {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col text-slate-800">
-        {/* Report Top Header */}
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-2xs">
-          <div className="max-w-4xl mx-auto px-4 py-2.5 sm:py-3 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setCurrentView('home')}
-                className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 transition"
-                aria-label="मुख्य पृष्ठावर जा (Back to Home)"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </button>
-              <div>
-                <h1 className="text-sm sm:text-base font-extrabold text-slate-900 leading-tight">
-                  {reportMode === 'form' ? 'अहवाल फॉर्म (Form)' : 'अहवाल पूर्वावलोकन (Preview)'}
-                </h1>
-                <p className="text-[11px] text-slate-500 font-medium">
-                  {formData.name || 'नवीन ग्राहक'}
-                </p>
+      <>
+        <div className="min-h-screen bg-slate-50 flex flex-col text-slate-800">
+          {/* Report Top Header */}
+          <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-2xs">
+            <div className="max-w-4xl mx-auto px-4 py-2.5 sm:py-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setCurrentView('home')}
+                  className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 transition"
+                  aria-label="मुख्य पृष्ठावर जा (Back to Home)"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <div>
+                  <h1 className="text-sm sm:text-base font-extrabold text-slate-900 leading-tight">
+                    {reportMode === 'form' ? 'अहवाल फॉर्म (Form)' : 'अहवाल पूर्वावलोकन (Preview)'}
+                  </h1>
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    {formData.name || 'नवीन ग्राहक'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Top Navigation: [Pen/Paper icon] and [Eye icon] ONLY */}
+              <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-2xl border border-slate-200/80">
+                <button
+                  type="button"
+                  onClick={() => setReportMode('form')}
+                  className={`p-2 rounded-xl transition flex items-center justify-center ${
+                    reportMode === 'form'
+                      ? 'bg-white text-emerald-700 shadow-xs ring-1 ring-slate-200'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                  title="फॉर्म भरा (Edit Form)"
+                  aria-label="फॉर्म भरा (Edit Form)"
+                >
+                  <PenLine className="w-4 h-4" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!pdfBlobUrl) {
+                      handleGenerate();
+                    } else {
+                      setReportMode('preview');
+                    }
+                  }}
+                  className={`p-2 rounded-xl transition flex items-center justify-center ${
+                    reportMode === 'preview'
+                      ? 'bg-white text-emerald-700 shadow-xs ring-1 ring-slate-200'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                  title="पूर्वावलोकन पहा (Preview Report)"
+                  aria-label="पूर्वावलोकन पहा (Preview Report)"
+                >
+                  <Eye className="w-4 h-4" />
+                </button>
               </div>
             </div>
+          </header>
 
-            {/* Top Navigation: [Pen/Paper icon] and [Eye icon] ONLY */}
-            <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-2xl border border-slate-200/80">
-              <button
-                type="button"
-                onClick={() => setReportMode('form')}
-                className={`p-2 rounded-xl transition flex items-center justify-center ${
-                  reportMode === 'form'
-                    ? 'bg-white text-emerald-700 shadow-xs ring-1 ring-slate-200'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-                title="फॉर्म भरा (Edit Form)"
-                aria-label="फॉर्म भरा (Edit Form)"
-              >
-                <PenLine className="w-4 h-4" />
-              </button>
+          {/* Main Workspace */}
+          <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6">
+            {reportMode === 'form' ? (
+              <ReportForm
+                data={formData}
+                onChange={setFormData}
+                onGenerate={handleGenerate}
+                isGenerating={isGenerating}
+              />
+            ) : (
+              <ReportPreview
+                data={formData}
+                pdfBlobUrl={pdfBlobUrl}
+                pdfBlob={pdfBlob}
+                shareUrl={shareUrl}
+              />
+            )}
+          </main>
+        </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  if (!pdfBlobUrl) {
-                    handleGenerate();
-                  } else {
-                    setReportMode('preview');
-                  }
-                }}
-                className={`p-2 rounded-xl transition flex items-center justify-center ${
-                  reportMode === 'preview'
-                    ? 'bg-white text-emerald-700 shadow-xs ring-1 ring-slate-200'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-                title="पूर्वावलोकन पहा (Preview Report)"
-                aria-label="पूर्वावलोकन पहा (Preview Report)"
-              >
-                <Eye className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </header>
-
-        {/* Main Workspace */}
-        <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6">
-          {reportMode === 'form' ? (
-            <ReportForm
-              data={formData}
-              onChange={setFormData}
-              onGenerate={handleGenerate}
-              isGenerating={isGenerating}
-            />
-          ) : (
-            <ReportPreview
-              data={formData}
-              pdfBlobUrl={pdfBlobUrl}
-              pdfBlob={pdfBlob}
-              shareUrl={shareUrl}
-            />
-          )}
-        </main>
-      </div>
+        <UpdateModal
+          updateInfo={updateInfo}
+          isOpen={isUpdateModalOpen}
+          onClose={() => setIsUpdateModalOpen(false)}
+        />
+      </>
     );
   }
 
@@ -365,6 +497,12 @@ export const App: React.FC = () => {
         onClose={() => setIsDrawerOpen(false)}
         onSelectOption={(opt) => setCurrentView(opt)}
         totalReportsCount={totalSavedReports}
+      />
+
+      <UpdateModal
+        updateInfo={updateInfo}
+        isOpen={isUpdateModalOpen}
+        onClose={() => setIsUpdateModalOpen(false)}
       />
     </>
   );

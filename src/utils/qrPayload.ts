@@ -1,4 +1,4 @@
-import { ReportData } from '../types';
+import type { ReportData } from '../types';
 
 /**
  * Field order for ultra-compact report serialization
@@ -261,47 +261,82 @@ export function extractReportDataFromUrl(urlOrSearch?: string): { report: Report
 }
 
 /**
+ * Default production public URL for Baliraja Fitness.
+ * Used when generating reports on standalone Android APKs or when no runtime public origin is available.
+ */
+export const DEFAULT_PUBLIC_APP_URL = 'https://mayur228-code.github.io/Baliraja-Fitness';
+
+/**
+ * Resolves the public, accessible base URL for the application.
+ * Hierarchy:
+ * 1. Explicit `customBaseUrl` parameter
+ * 2. Coach-configured custom share URL in localStorage (`baliraja_custom_share_url`)
+ * 3. Environment variables (`VITE_APP_URL` or `VITE_PUBLIC_URL`)
+ * 4. Runtime window origin on deployed public web host (non-localhost, with base path)
+ * 5. Local development fallback (in DEV mode on desktop/browser)
+ * 6. Fallback to `DEFAULT_PUBLIC_APP_URL` (NEVER emit localhost in production / Android APKs)
+ */
+export function getAppBaseUrl(customBaseUrl?: string): string {
+  // 1. Explicit parameter override
+  if (customBaseUrl && customBaseUrl.trim()) {
+    return customBaseUrl.trim().replace(/\/$/, '');
+  }
+
+  // 2. Custom URL saved in localStorage
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const savedCustom = localStorage.getItem('baliraja_custom_share_url');
+      if (savedCustom && savedCustom.trim()) {
+        return savedCustom.trim().replace(/\/$/, '');
+      }
+    } catch (e) {
+      // Ignore localStorage access issues
+    }
+  }
+
+  // 3. Environment variable if configured
+  const metaEnv = typeof import.meta !== 'undefined' ? (import.meta as any).env : undefined;
+  if (metaEnv?.VITE_APP_URL && typeof metaEnv.VITE_APP_URL === 'string' && metaEnv.VITE_APP_URL.trim()) {
+    return metaEnv.VITE_APP_URL.trim().replace(/\/$/, '');
+  }
+  if (metaEnv?.VITE_PUBLIC_URL && typeof metaEnv.VITE_PUBLIC_URL === 'string' && metaEnv.VITE_PUBLIC_URL.trim()) {
+    return metaEnv.VITE_PUBLIC_URL.trim().replace(/\/$/, '');
+  }
+
+  // 4. Runtime browser origin on a deployed public website (GitHub Pages, Vercel, Netlify, custom domain)
+  if (typeof window !== 'undefined' && window.location) {
+    const origin = window.location.origin;
+    if (
+      origin &&
+      !origin.includes('localhost') &&
+      !origin.includes('127.0.0.1') &&
+      !origin.startsWith('capacitor://') &&
+      !origin.startsWith('file://')
+    ) {
+      const basePath = metaEnv?.BASE_URL && metaEnv.BASE_URL !== '/'
+        ? metaEnv.BASE_URL.replace(/\/$/, '')
+        : '';
+      return `${origin}${basePath}`.replace(/\/$/, '');
+    }
+  }
+
+  // 5. Local development fallback (in DEV mode on browser)
+  if (metaEnv?.DEV && typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin.replace(/\/$/, '');
+  }
+
+  // 6. Default public fallback for Android native app and production builds
+  return DEFAULT_PUBLIC_APP_URL;
+}
+
+/**
  * Determine the optimal, accessible Base URL for sharing reports & generating QR codes.
+ * Returns: `${baseUrl}/report/${id}?d=${compactPayload}`
  */
 export function getReportShareUrl(report: ReportData, customBaseUrl?: string): string {
   const compactPayload = encodeReportToCompactString(report);
   const id = report.reportId || 'report';
-
-  let baseUrl = '';
-
-  // 1. Custom URL explicitly provided or stored in localStorage
-  if (customBaseUrl && customBaseUrl.trim()) {
-    baseUrl = customBaseUrl.trim().replace(/\/$/, '');
-  } else if (typeof window !== 'undefined' && window.localStorage) {
-    const savedCustom = localStorage.getItem('baliraja_custom_share_url');
-    if (savedCustom && savedCustom.trim()) {
-      baseUrl = savedCustom.trim().replace(/\/$/, '');
-    }
-  }
-
-  // 2. If not specified and in browser window
-  if (!baseUrl && typeof window !== 'undefined') {
-    const origin = window.location.origin;
-    // If not running on local-only loopback inside WebView
-    if (origin && !origin.includes('localhost') && !origin.includes('127.0.0.1') && !origin.includes('capacitor://')) {
-      baseUrl = origin;
-    }
-  }
-
-  // 3. Environment variable if available
-  const metaEnv = typeof import.meta !== 'undefined' ? (import.meta as any).env : undefined;
-  if (!baseUrl && metaEnv?.VITE_APP_URL) {
-    baseUrl = (metaEnv.VITE_APP_URL as string).replace(/\/$/, '');
-  }
-
-  // 4. Default fallback: keep clean path
-  if (!baseUrl) {
-    if (typeof window !== 'undefined' && window.location.origin) {
-      baseUrl = window.location.origin;
-    } else {
-      baseUrl = 'http://127.0.0.1:5173';
-    }
-  }
+  const baseUrl = getAppBaseUrl(customBaseUrl);
 
   return `${baseUrl}/report/${id}?d=${compactPayload}`;
 }
