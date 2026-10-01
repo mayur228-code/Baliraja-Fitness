@@ -1,10 +1,11 @@
 import React, { useEffect } from 'react';
-import { X, FileText, Phone, Info, ChevronRight, ShieldCheck, Activity } from 'lucide-react';
+import { X, FileText, Phone, Info, ChevronRight, ShieldCheck, Activity, Smartphone } from 'lucide-react';
+import { DEFAULT_APP_METADATA } from '../utils/appConfig';
 
 interface NavigationDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelectOption: (option: 'reports' | 'contact' | 'about') => void;
+  onSelectOption: (option: 'reports' | 'contact' | 'about' | 'download') => void;
   totalReportsCount?: number;
 }
 
@@ -92,7 +93,32 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
             <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-600 transition-transform group-hover:translate-x-0.5" />
           </button>
 
-          {/* Option 2: Contact Us */}
+          {/* Option 2: Download App */}
+          <button
+            type="button"
+            onClick={() => {
+              onSelectOption('download');
+              onClose();
+            }}
+            className="w-full p-3.5 rounded-2xl hover:bg-emerald-50/70 active:bg-emerald-100/70 text-slate-800 transition flex items-center justify-between group"
+          >
+            <div className="flex items-center gap-3.5">
+              <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <Smartphone className="w-5 h-5" />
+              </div>
+              <div className="text-left">
+                <span className="block text-sm font-extrabold text-slate-900 group-hover:text-emerald-900">
+                  ॲप डाउनलोड (Download App)
+                </span>
+                <span className="text-[11px] text-slate-500 font-medium">
+                  अँड्रॉइड APK व QR कोड
+                </span>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-600 transition-transform group-hover:translate-x-0.5" />
+          </button>
+
+          {/* Option 3: Contact Us */}
           <button
             type="button"
             onClick={() => {
@@ -117,7 +143,7 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
             <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-teal-600 transition-transform group-hover:translate-x-0.5" />
           </button>
 
-          {/* Option 3: About */}
+          {/* Option 4: About */}
           <button
             type="button"
             onClick={() => {
@@ -150,7 +176,7 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
             <span>१००% स्थानिक व सुरक्षित स्टोरेज</span>
           </div>
           <p className="text-[10px] text-slate-400">
-            Baliraja Fitness • Version 1.0.0
+            Baliraja Fitness • Version {DEFAULT_APP_METADATA.version}
           </p>
         </div>
       </div>

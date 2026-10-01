@@ -60,7 +60,7 @@ function apiPlugin(): Plugin {
 }
 
 export default defineConfig({
-  base: process.env.VITE_BASE_PATH || '/Baliraja-Fitness/',
+  base: process.env.VITE_BASE_PATH || '/',
   plugins: [react(), apiPlugin()],
   server: {
     host: '0.0.0.0',

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ProductItem, SuggestionRecommendations } from '../utils/recommendations';
+import { resolveAssetUrl } from '../utils/assetPath';
 import { Sparkles, ShieldCheck, Zap, X } from 'lucide-react';
 
 interface ProductModalProps {
@@ -94,7 +95,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({ product, onClose }) 
           }}
         >
           <img
-            src={product.imagePath}
+            src={resolveAssetUrl(product.imagePath)}
             alt={product.name}
             className={`max-h-full max-w-full object-contain select-none transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
               isPopped
@@ -188,7 +189,7 @@ export const ProductDisplayItem: React.FC<ProductDisplayItemProps> = ({ product,
       {/* Product Image Cutout Container (No background card/panel) */}
       <div className="relative flex items-center justify-center h-32 sm:h-36 w-full">
         <img
-          src={product.imagePath}
+          src={resolveAssetUrl(product.imagePath)}
           alt={product.name}
           className={`max-h-full max-w-full object-contain select-none transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
             isPopped

@@ -4,6 +4,7 @@ import { ReportData } from '../types';
 import { getBodyFatStatus, getVisceralFatStatus, getBmiStatus } from './calculations';
 import { getRecommendations, ProductItem } from './recommendations';
 import { getReportShareUrl } from './qrPayload';
+import { resolveAssetUrl } from './assetPath';
 
 // A4 dimensions in points
 const PDF_WIDTH_PT = 595.5;
@@ -21,9 +22,10 @@ async function getTemplateArrayBuffer(): Promise<ArrayBuffer> {
   if (cachedTemplateBuffer) {
     return cachedTemplateBuffer.slice(0);
   }
-  const templateResponse = await fetch('/BAR.pdf');
+  const templateUrl = resolveAssetUrl('/BAR.pdf');
+  const templateResponse = await fetch(templateUrl);
   if (!templateResponse.ok) {
-    throw new Error('Failed to load BAR.pdf template.');
+    throw new Error(`Failed to load BAR.pdf template from ${templateUrl}`);
   }
   cachedTemplateBuffer = await templateResponse.arrayBuffer();
   return cachedTemplateBuffer.slice(0);
@@ -33,14 +35,15 @@ async function getTemplateArrayBuffer(): Promise<ArrayBuffer> {
 const imageCache = new Map<string, HTMLImageElement>();
 
 function loadImage(src: string): Promise<HTMLImageElement> {
-  if (imageCache.has(src)) {
-    return Promise.resolve(imageCache.get(src)!);
+  const resolvedSrc = resolveAssetUrl(src);
+  if (imageCache.has(resolvedSrc)) {
+    return Promise.resolve(imageCache.get(resolvedSrc)!);
   }
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      imageCache.set(src, img);
+      imageCache.set(resolvedSrc, img);
       if ('decode' in img) {
         img.decode().catch(() => {}).finally(() => resolve(img));
       } else {
@@ -48,10 +51,10 @@ function loadImage(src: string): Promise<HTMLImageElement> {
       }
     };
     img.onerror = () => {
-      console.warn(`[pdfGenerator] Warning: Could not load image from ${src}`);
-      reject(new Error(`Failed to load image at ${src}`));
+      console.warn(`[pdfGenerator] Warning: Could not load image from ${resolvedSrc}`);
+      reject(new Error(`Failed to load image at ${resolvedSrc}`));
     };
-    img.src = src;
+    img.src = resolvedSrc;
   });
 }
 

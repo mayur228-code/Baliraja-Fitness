@@ -94,12 +94,19 @@ export async function savePdfToDevice(
           : new Blob([pdfBlobOrBytes as unknown as BlobPart], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
+      a.style.display = 'none';
       a.href = url;
       a.download = fileName;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
       document.body.appendChild(a);
       a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      setTimeout(() => {
+        if (a.parentNode) {
+          a.parentNode.removeChild(a);
+        }
+        URL.revokeObjectURL(url);
+      }, 30000);
 
       return {
         success: true,

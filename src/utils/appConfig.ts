@@ -20,8 +20,8 @@ export interface AppReleaseMetadata {
 }
 
 export const DEFAULT_APP_METADATA: AppReleaseMetadata = {
-  version: '1.0.1',
-  versionCode: 2,
+  version: '1.0.3',
+  versionCode: 4,
   releaseDate: 'ऑक्टोबर २०२६ (October 2026)',
   apkFileName: 'app-release.apk',
   apkFileSize: '29.8 MB',
