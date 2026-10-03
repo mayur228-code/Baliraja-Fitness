@@ -10,8 +10,8 @@ import { resolveAssetUrl } from './assetPath';
 const PDF_WIDTH_PT = 595.5;
 const PDF_HEIGHT_PT = 842.25;
 
-// Render scale for crystal clear typography on A4 (300 DPI equivalent)
-const DPI_SCALE = 3.5;
+// Render scale for crystal clear typography on A4
+const DPI_SCALE = 2.5;
 const CANVAS_WIDTH = Math.round(PDF_WIDTH_PT * DPI_SCALE);
 const CANVAS_HEIGHT = Math.round(PDF_HEIGHT_PT * DPI_SCALE);
 
@@ -74,6 +74,22 @@ function canvasToPngBytes(canvas: HTMLCanvasElement): Promise<Uint8Array> {
   });
 }
 
+async function ensureFontLoaded(): Promise<void> {
+  if (typeof document !== 'undefined' && 'fonts' in document && typeof FontFace !== 'undefined') {
+    try {
+      const fontUrl = resolveAssetUrl('/NotoSansDevanagari-Bold.ttf');
+      const notoFont = new FontFace('Noto Sans Devanagari', `url("${fontUrl}")`, {
+        weight: '700',
+        style: 'normal',
+      });
+      const loaded = await notoFont.load();
+      document.fonts.add(loaded);
+    } catch (e) {
+      // Silently fallback to system fonts
+    }
+  }
+}
+
 /**
  * Warm up and preload all PDF assets (Template BAR.pdf, all product images, and fonts)
  * Runs asynchronously on app launch to make subsequent PDF generation instantaneous.
@@ -82,6 +98,7 @@ export async function preloadPdfAssets(): Promise<void> {
   try {
     const promises: Promise<any>[] = [
       getTemplateArrayBuffer().catch((e) => console.warn('[preloadPdfAssets] Template preload notice:', e)),
+      ensureFontLoaded(),
     ];
 
     if (typeof document !== 'undefined' && document.fonts) {
@@ -132,53 +149,41 @@ export interface DrawTextInBoxOptions {
   color?: string;
   fontFamily?: string;
   isBold?: boolean;
-  padding?: { horizontal?: number; vertical?: number };
+  padding?: { horizontal?: number };
   align?: CanvasTextAlign;
 }
 
 /**
- * Reusable helper: Draws text visually centered inside a rectangular box using exact font metrics.
- * Baseline Y is mathematically derived from the box center and the actual glyph ascent/descent,
- * ensuring equal visual clearance from the top and bottom borders.
+ * Reusable helper: Draws text centered inside a comparison box using proven typographical centering.
+ * Baseline Y = (box.y + box.height / 2) + fontSize * 0.35
+ * This matches standard typographic visual centering (cap-height midpoint) and avoids platform font metric discrepancies.
  */
 export function drawTextCenteredInBox(options: DrawTextInBoxOptions): void {
   const {
     ctx,
     text,
     box,
-    initialFontSize = 12.5,
+    initialFontSize = 12.0,
     minFontSize = 7.0,
     color = '#001a70',
-    fontFamily = "'Noto Sans Devanagari', 'Mukta', 'Arial', sans-serif",
+    fontFamily = "'Arial', sans-serif",
     isBold = true,
-    padding = { horizontal: 3, vertical: 2 },
+    padding = { horizontal: 3 },
     align = 'center',
   } = options;
 
   if (!text || text.trim() === '') return;
 
   const hPad = padding.horizontal ?? 3;
-  const vPad = padding.vertical ?? 2;
   const availableWidth = Math.max(8, box.width - 2 * hPad);
-  const availableHeight = Math.max(6, box.height - 2 * vPad);
 
   let fontSize = initialFontSize;
   const fontWeight = isBold ? 'bold' : '500';
   ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
 
-  // Measure text and adjust font size if needed to strictly respect safe internal padding
-  let metrics = ctx.measureText(text);
-  let ascent = metrics.actualBoundingBoxAscent ?? (fontSize * 0.75);
-  let descent = metrics.actualBoundingBoxDescent ?? (fontSize * 0.22);
-  let glyphHeight = ascent + descent;
-
-  while ((metrics.width > availableWidth || glyphHeight > availableHeight) && fontSize > minFontSize) {
+  while (ctx.measureText(text).width > availableWidth && fontSize > minFontSize) {
     fontSize -= 0.5;
     ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
-    metrics = ctx.measureText(text);
-    ascent = metrics.actualBoundingBoxAscent ?? (fontSize * 0.75);
-    descent = metrics.actualBoundingBoxDescent ?? (fontSize * 0.22);
-    glyphHeight = ascent + descent;
   }
 
   // Calculate horizontal X
@@ -194,24 +199,19 @@ export function drawTextCenteredInBox(options: DrawTextInBoxOptions): void {
     ctx.textAlign = 'right';
   }
 
-  // Calculate baseline Y for exact visual glyph centering:
-  // With textBaseline = 'alphabetic', top of visible glyphs is (baselineY - ascent)
-  // and bottom is (baselineY + descent). Midpoint = baselineY - (ascent - descent)/2.
-  // Setting Midpoint = boxCenterY (box.y + box.height/2) yields:
+  // Exact vertical baseline calculation matching test_render_v2.py
   const boxCenterY = box.y + box.height / 2;
-  const baselineY = boxCenterY + (ascent - descent) / 2;
-
+  const baselineY = boxCenterY + fontSize * 0.35;
   ctx.fillStyle = color;
   ctx.textBaseline = 'alphabetic';
   ctx.fillText(text, drawX, baselineY);
 }
 
-export interface DrawTextRelativeToLineOptions {
+export interface DrawTextAtBaselineOptions {
   ctx: CanvasRenderingContext2D;
   text: string;
   x: number;
-  lineY: number;
-  linePosition: 'above' | 'below';
+  baselineY: number;
   initialFontSize?: number;
   minFontSize?: number;
   maxWidth?: number;
@@ -219,20 +219,17 @@ export interface DrawTextRelativeToLineOptions {
   fontFamily?: string;
   isBold?: boolean;
   align?: CanvasTextAlign;
-  gap?: number;
 }
 
 /**
- * Reusable helper: Draws text with intentional visual clearance from a horizontal line.
- * Accounts for actual font metrics and descenders (g, j, p, q, y) so text never cuts or touches the line.
+ * Reusable helper: Draws text at calibrated baseline coordinates with width auto-fit.
  */
-export function drawTextRelativeToLine(options: DrawTextRelativeToLineOptions): void {
+export function drawTextAtBaseline(options: DrawTextAtBaselineOptions): void {
   const {
     ctx,
     text,
     x,
-    lineY,
-    linePosition,
+    baselineY,
     initialFontSize = 12.0,
     minFontSize = 7.0,
     maxWidth,
@@ -240,7 +237,6 @@ export function drawTextRelativeToLine(options: DrawTextRelativeToLineOptions): 
     fontFamily = "'Noto Sans Devanagari', 'Mukta', 'Arial', sans-serif",
     isBold = true,
     align = 'left',
-    gap = 2.5,
   } = options;
 
   if (!text || text.trim() === '') return;
@@ -256,23 +252,6 @@ export function drawTextRelativeToLine(options: DrawTextRelativeToLineOptions): 
     }
   }
 
-  const metrics = ctx.measureText(text);
-  const ascent = metrics.actualBoundingBoxAscent ?? (fontSize * 0.75);
-  const descent = Math.max(0, metrics.actualBoundingBoxDescent ?? (fontSize * 0.22));
-
-  let baselineY: number;
-  if (linePosition === 'below') {
-    // CASE A — LINE IS BELOW THE TEXT:
-    // Text sits slightly ABOVE the line. The lowest point of glyphs is (baselineY + descent).
-    // We enforce: baselineY + descent = lineY - gap.
-    baselineY = lineY - gap - descent;
-  } else {
-    // CASE B — LINE IS ABOVE THE TEXT:
-    // Text sits slightly BELOW the line. The highest point of glyphs is (baselineY - ascent).
-    // We enforce: baselineY - ascent = lineY + gap.
-    baselineY = lineY + gap + ascent;
-  }
-
   ctx.fillStyle = color;
   ctx.textAlign = align;
   ctx.textBaseline = 'alphabetic';
@@ -280,31 +259,27 @@ export function drawTextRelativeToLine(options: DrawTextRelativeToLineOptions): 
 }
 
 // 17 Template Comparison Box Rectangles (Calibrated with exact geometry from BAR.pdf)
-export const BOX_BODY_FAT_NORMAL: BoxRect = { x: 164.0, y: 238.0, width: 47.1, height: 17.9 };
-export const BOX_BODY_FAT_HIGH: BoxRect = { x: 250.4, y: 229.0, width: 47.1, height: 17.9 };
-export const BOX_BODY_FAT_RISK: BoxRect = { x: 340.9, y: 229.0, width: 47.1, height: 17.9 };
+export const BOX_BODY_FAT_NORMAL: BoxRect = { x: 164.2, y: 238.1, width: 46.9, height: 17.9 };
+export const BOX_BODY_FAT_HIGH: BoxRect = { x: 250.6, y: 229.1, width: 46.9, height: 17.9 };
+export const BOX_BODY_FAT_RISK: BoxRect = { x: 341.2, y: 229.1, width: 46.9, height: 17.9 };
 
-export const BOX_VISCERAL_NORMAL: BoxRect = { x: 164.0, y: 313.1, width: 47.1, height: 17.9 };
-export const BOX_VISCERAL_HIGH: BoxRect = { x: 250.4, y: 304.2, width: 47.1, height: 17.9 };
-export const BOX_VISCERAL_RISK: BoxRect = { x: 340.8, y: 304.2, width: 47.1, height: 17.9 };
+export const BOX_VISCERAL_NORMAL: BoxRect = { x: 164.2, y: 313.3, width: 46.9, height: 17.9 };
+export const BOX_VISCERAL_HIGH: BoxRect = { x: 250.6, y: 304.3, width: 46.9, height: 17.9 };
+export const BOX_VISCERAL_RISK: BoxRect = { x: 341.0, y: 304.3, width: 46.9, height: 17.9 };
 
-export const BOX_BMI_NORMAL: BoxRect = { x: 164.0, y: 420.9, width: 47.1, height: 17.9 };
-export const BOX_BMI_HIGH: BoxRect = { x: 250.6, y: 411.5, width: 47.1, height: 17.9 };
-export const BOX_BMI_RISK: BoxRect = { x: 338.9, y: 411.5, width: 47.1, height: 17.9 };
+export const BOX_BMI_NORMAL: BoxRect = { x: 164.2, y: 421.1, width: 46.9, height: 17.9 };
+export const BOX_BMI_HIGH: BoxRect = { x: 250.8, y: 411.7, width: 46.9, height: 17.9 };
+export const BOX_BMI_RISK: BoxRect = { x: 339.2, y: 411.7, width: 46.9, height: 17.9 };
 
-export const BOX_SUB_WHOLE: BoxRect = { x: 65.9, y: 563.5, width: 47.1, height: 17.9 };
-export const BOX_SUB_ARMS: BoxRect = { x: 164.0, y: 555.1, width: 47.1, height: 17.9 };
-export const BOX_SUB_TRUNK: BoxRect = { x: 253.3, y: 554.8, width: 47.1, height: 17.9 };
-export const BOX_SUB_LEGS: BoxRect = { x: 338.9, y: 554.6, width: 47.1, height: 17.9 };
+export const BOX_SUB_WHOLE: BoxRect = { x: 66.1, y: 563.7, width: 46.9, height: 17.9 };
+export const BOX_SUB_ARMS: BoxRect = { x: 164.2, y: 555.3, width: 46.9, height: 17.9 };
+export const BOX_SUB_TRUNK: BoxRect = { x: 253.5, y: 555.0, width: 46.9, height: 17.9 };
+export const BOX_SUB_LEGS: BoxRect = { x: 339.2, y: 554.8, width: 46.9, height: 17.9 };
 
-export const BOX_SKEL_WHOLE: BoxRect = { x: 64.3, y: 635.1, width: 47.1, height: 17.9 };
-export const BOX_SKEL_ARMS: BoxRect = { x: 164.0, y: 629.4, width: 47.1, height: 17.9 };
-export const BOX_SKEL_TRUNK: BoxRect = { x: 253.3, y: 628.9, width: 47.1, height: 17.9 };
-export const BOX_SKEL_LEGS: BoxRect = { x: 338.9, y: 629.4, width: 47.1, height: 17.9 };
-
-export const BOX_MEAS_ARMS: BoxRect = { x: 440.0, y: 603.05, width: 50.0, height: 13.5 };
-export const BOX_MEAS_WAIST: BoxRect = { x: 440.0, y: 616.55, width: 50.0, height: 13.5 };
-export const BOX_MEAS_THIGH: BoxRect = { x: 440.0, y: 630.06, width: 50.0, height: 13.76 };
+export const BOX_SKEL_WHOLE: BoxRect = { x: 64.4, y: 635.4, width: 46.9, height: 17.9 };
+export const BOX_SKEL_ARMS: BoxRect = { x: 164.2, y: 629.7, width: 46.9, height: 17.9 };
+export const BOX_SKEL_TRUNK: BoxRect = { x: 253.5, y: 629.1, width: 46.9, height: 17.9 };
+export const BOX_SKEL_LEGS: BoxRect = { x: 339.2, y: 629.7, width: 46.9, height: 17.9 };
 
 /**
  * Generate full 2-page PDF with high performance:
@@ -316,6 +291,7 @@ export async function generateReportPdf(
   shareUrl?: string
 ): Promise<{ pdfBytes: Uint8Array; blobUrl: string; qrDataUrl?: string; pdfBlob: Blob }> {
   // Ensure custom offline fonts are loaded before canvas measurements
+  await ensureFontLoaded();
   if (typeof document !== 'undefined' && document.fonts) {
     try {
       await document.fonts.ready;
@@ -324,26 +300,23 @@ export async function generateReportPdf(
     }
   }
 
-  // 1. Fetch template buffer & generate QR code in parallel
-  const effectiveShareUrl = shareUrl || getReportShareUrl(data);
+  // 1. Fetch template & generate QR in parallel
   const templatePromise = getTemplateArrayBuffer();
-  const qrPromise = effectiveShareUrl
-    ? QRCode.toDataURL(effectiveShareUrl, {
-        margin: 2,
-        width: 400,
-        errorCorrectionLevel: 'M',
+  const urlToEncode = shareUrl || getReportShareUrl(data);
+  const qrPromise = urlToEncode
+    ? QRCode.toDataURL(urlToEncode, {
+        width: 180,
+        margin: 1,
         color: {
-          dark: '#000000',
+          dark: '#001a70',
           light: '#ffffff',
         },
       })
-    : Promise.resolve('');
+    : Promise.resolve(undefined);
 
   const [templateBytes, qrDataUrl] = await Promise.all([templatePromise, qrPromise]);
 
-  // =============================================================
-  // 2. PAGE 1: Canvas for text overlay on template
-  // =============================================================
+  // 2. PAGE 1: Canvas for calibrated text overlays + QR code
   const canvas1 = document.createElement('canvas');
   canvas1.width = CANVAS_WIDTH;
   canvas1.height = CANVAS_HEIGHT;
@@ -353,131 +326,115 @@ export async function generateReportPdf(
   }
   ctx1.scale(DPI_SCALE, DPI_SCALE);
 
-  // Header Fields (Personal Details - Above underlines with consistent safe visual gap)
-  drawTextRelativeToLine({
+  // Header Fields (Personal Details - Exact baseline positioning above printed lines)
+  drawTextAtBaseline({
     ctx: ctx1,
     text: data.name,
     x: 80,
-    lineY: 81.50,
-    linePosition: 'below',
+    baselineY: 78.5,
     initialFontSize: 12.5,
     maxWidth: 225,
     color: '#001a70',
-    gap: 2.5,
   });
 
-  drawTextRelativeToLine({
+  drawTextAtBaseline({
     ctx: ctx1,
     text: data.mobile,
     x: 395,
-    lineY: 92.20,
-    linePosition: 'below',
+    baselineY: 89.0,
     initialFontSize: 12.5,
     maxWidth: 114,
     color: '#001a70',
-    gap: 2.5,
   });
 
-  drawTextRelativeToLine({
+  drawTextAtBaseline({
     ctx: ctx1,
     text: data.village,
     x: 80,
-    lineY: 105.33,
-    linePosition: 'below',
+    baselineY: 102.0,
     initialFontSize: 12.0,
     maxWidth: 150,
     color: '#001a70',
-    gap: 2.5,
   });
 
   const ageGenderText = data.age
     ? `${data.age} (${data.gender === 'Male' ? 'M' : 'F'})`
     : '';
-  drawTextRelativeToLine({
+  drawTextAtBaseline({
     ctx: ctx1,
     text: ageGenderText,
     x: 272,
-    lineY: 115.84,
-    linePosition: 'below',
+    baselineY: 112.5,
     initialFontSize: 11.5,
     maxWidth: 52,
     color: '#001a70',
-    gap: 2.5,
   });
 
   const heightText = data.height ? `${data.height} cm` : '';
-  drawTextRelativeToLine({
+  drawTextAtBaseline({
     ctx: ctx1,
     text: heightText,
     x: 354,
-    lineY: 114.91,
-    linePosition: 'below',
+    baselineY: 112.0,
     initialFontSize: 11.5,
     maxWidth: 50,
     color: '#001a70',
-    gap: 2.5,
   });
 
-  drawTextRelativeToLine({
+  drawTextAtBaseline({
     ctx: ctx1,
     text: data.date,
     x: 452,
-    lineY: 114.54,
-    linePosition: 'below',
+    baselineY: 111.5,
     initialFontSize: 11.5,
     maxWidth: 74,
     color: '#001a70',
-    gap: 2.5,
   });
 
-  // Weight Row (Positioned with safe clearance between lines 133.76 and 174.93)
+  // Weight Row (Exact calibrated baseline Y = 163.0 inside weight boxes)
   const weightVal = data.weight ? `${data.weight} kg` : '';
   const idealVal = data.idealWeight ? `${data.idealWeight} kg` : '';
   const extraVal = data.extraWeight || '-';
   const lessVal = data.lessWeight || '-';
 
-  drawTextRelativeToLine({
+  drawTextAtBaseline({
     ctx: ctx1,
     text: weightVal,
     x: 92,
-    lineY: 174.93,
-    linePosition: 'below',
+    baselineY: 163.0,
     initialFontSize: 13.0,
+    fontFamily: "'Arial', sans-serif",
     color: '#001a70',
-    gap: 15.0,
   });
 
-  drawTextRelativeToLine({
+  drawTextAtBaseline({
     ctx: ctx1,
     text: idealVal,
     x: 262,
-    lineY: 174.93,
-    linePosition: 'below',
+    baselineY: 163.0,
     initialFontSize: 13.0,
+    fontFamily: "'Arial', sans-serif",
     color: '#001a70',
-    gap: 15.0,
   });
 
-  drawTextRelativeToLine({
+  drawTextAtBaseline({
     ctx: ctx1,
     text: extraVal,
     x: 376,
-    lineY: 174.93,
-    linePosition: 'below',
+    baselineY: 163.0,
     initialFontSize: 13.0,
+    fontFamily: "'Arial', sans-serif",
     color: extraVal !== '-' ? '#b91c1c' : '#001a70',
-    gap: 15.0,
   });
 
-  drawTextRelativeToLine({
+  drawTextAtBaseline({
     ctx: ctx1,
     text: lessVal,
     x: 486,
-    lineY: 174.93,
-    linePosition: 'below',
+    baselineY: 163.0,
     initialFontSize: 13.0,
+    fontFamily: "'Arial', sans-serif",
     color: lessVal !== '-' ? '#047857' : '#001a70',
-    gap: 15.0,
   });
 
   // Core Comparison Categories (17 Rectangular Boxes with exact visual centering)
@@ -489,11 +446,11 @@ export async function generateReportPdf(
     const bfText = `${data.bodyFat}%`;
     const bfStatus = getBodyFatStatus(numBodyFat, data.gender);
     if (bfStatus === 'Normal') {
-      drawTextCenteredInBox({ ctx: ctx1, text: bfText, box: BOX_BODY_FAT_NORMAL, initialFontSize: 12.5, color: '#047857' });
+      drawTextCenteredInBox({ ctx: ctx1, text: bfText, box: BOX_BODY_FAT_NORMAL, initialFontSize: 12.0, color: '#047857' });
     } else if (bfStatus === 'High') {
-      drawTextCenteredInBox({ ctx: ctx1, text: bfText, box: BOX_BODY_FAT_HIGH, initialFontSize: 12.5, color: '#b45309' });
+      drawTextCenteredInBox({ ctx: ctx1, text: bfText, box: BOX_BODY_FAT_HIGH, initialFontSize: 12.0, color: '#b45309' });
     } else if (bfStatus === 'Risk') {
-      drawTextCenteredInBox({ ctx: ctx1, text: bfText, box: BOX_BODY_FAT_RISK, initialFontSize: 12.5, color: '#b91c1c' });
+      drawTextCenteredInBox({ ctx: ctx1, text: bfText, box: BOX_BODY_FAT_RISK, initialFontSize: 12.0, color: '#b91c1c' });
     }
   }
 
@@ -501,24 +458,23 @@ export async function generateReportPdf(
     const vfText = `${data.visceralFat}%`;
     const vfStatus = getVisceralFatStatus(numVisceral, data.gender);
     if (vfStatus === 'Normal') {
-      drawTextCenteredInBox({ ctx: ctx1, text: vfText, box: BOX_VISCERAL_NORMAL, initialFontSize: 12.5, color: '#047857' });
+      drawTextCenteredInBox({ ctx: ctx1, text: vfText, box: BOX_VISCERAL_NORMAL, initialFontSize: 12.0, color: '#047857' });
     } else if (vfStatus === 'High') {
-      drawTextCenteredInBox({ ctx: ctx1, text: vfText, box: BOX_VISCERAL_HIGH, initialFontSize: 12.5, color: '#b45309' });
+      drawTextCenteredInBox({ ctx: ctx1, text: vfText, box: BOX_VISCERAL_HIGH, initialFontSize: 12.0, color: '#b45309' });
     } else if (vfStatus === 'Risk') {
-      drawTextCenteredInBox({ ctx: ctx1, text: vfText, box: BOX_VISCERAL_RISK, initialFontSize: 12.5, color: '#b91c1c' });
+      drawTextCenteredInBox({ ctx: ctx1, text: vfText, box: BOX_VISCERAL_RISK, initialFontSize: 12.0, color: '#b91c1c' });
     }
   }
 
   if (data.restingMetabolism) {
-    drawTextRelativeToLine({
+    drawTextAtBaseline({
       ctx: ctx1,
       text: `${data.restingMetabolism} kcal`,
       x: 255,
-      lineY: 388.00,
-      linePosition: 'below',
+      baselineY: 374.0,
       initialFontSize: 12.5,
+      fontFamily: "'Arial', sans-serif",
       color: '#001a70',
-      gap: 15.0,
     });
   }
 
@@ -526,43 +482,41 @@ export async function generateReportPdf(
     const bmiText = `${data.bmi}`;
     const bmiStatus = getBmiStatus(numBmi, data.gender);
     if (bmiStatus === 'Normal') {
-      drawTextCenteredInBox({ ctx: ctx1, text: bmiText, box: BOX_BMI_NORMAL, initialFontSize: 12.5, color: '#047857' });
+      drawTextCenteredInBox({ ctx: ctx1, text: bmiText, box: BOX_BMI_NORMAL, initialFontSize: 12.0, color: '#047857' });
     } else if (bmiStatus === 'High') {
-      drawTextCenteredInBox({ ctx: ctx1, text: bmiText, box: BOX_BMI_HIGH, initialFontSize: 12.5, color: '#b45309' });
+      drawTextCenteredInBox({ ctx: ctx1, text: bmiText, box: BOX_BMI_HIGH, initialFontSize: 12.0, color: '#b45309' });
     } else if (bmiStatus === 'Risk') {
-      drawTextCenteredInBox({ ctx: ctx1, text: bmiText, box: BOX_BMI_RISK, initialFontSize: 12.5, color: '#b91c1c' });
+      drawTextCenteredInBox({ ctx: ctx1, text: bmiText, box: BOX_BMI_RISK, initialFontSize: 12.0, color: '#b91c1c' });
     }
   }
 
   if (data.bodyAge) {
-    drawTextRelativeToLine({
+    drawTextAtBaseline({
       ctx: ctx1,
       text: `${data.bodyAge} वर्षे`,
       x: 318,
-      lineY: 495.10,
-      linePosition: 'below',
+      baselineY: 474.0,
       initialFontSize: 12.0,
       color: '#001a70',
-      gap: 15.0,
     });
   }
 
   // Regional Subcutaneous Fat
-  if (data.subWhole) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subWhole}%`, box: BOX_SUB_WHOLE, initialFontSize: 12.5, color: '#001a70' });
-  if (data.subArms) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subArms}%`, box: BOX_SUB_ARMS, initialFontSize: 12.5, color: '#001a70' });
-  if (data.subTrunk) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subTrunk}%`, box: BOX_SUB_TRUNK, initialFontSize: 12.5, color: '#001a70' });
-  if (data.subLegs) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subLegs}%`, box: BOX_SUB_LEGS, initialFontSize: 12.5, color: '#001a70' });
+  if (data.subWhole) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subWhole}%`, box: BOX_SUB_WHOLE, initialFontSize: 12.0, color: '#001a70' });
+  if (data.subArms) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subArms}%`, box: BOX_SUB_ARMS, initialFontSize: 12.0, color: '#001a70' });
+  if (data.subTrunk) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subTrunk}%`, box: BOX_SUB_TRUNK, initialFontSize: 12.0, color: '#001a70' });
+  if (data.subLegs) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subLegs}%`, box: BOX_SUB_LEGS, initialFontSize: 12.0, color: '#001a70' });
 
   // Regional Skeletal Muscle
-  if (data.skelWhole) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelWhole}%`, box: BOX_SKEL_WHOLE, initialFontSize: 12.5, color: '#001a70' });
-  if (data.skelArms) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelArms}%`, box: BOX_SKEL_ARMS, initialFontSize: 12.5, color: '#001a70' });
-  if (data.skelTrunk) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelTrunk}%`, box: BOX_SKEL_TRUNK, initialFontSize: 12.5, color: '#001a70' });
-  if (data.skelLegs) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelLegs}%`, box: BOX_SKEL_LEGS, initialFontSize: 12.5, color: '#001a70' });
+  if (data.skelWhole) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelWhole}%`, box: BOX_SKEL_WHOLE, initialFontSize: 12.0, color: '#001a70' });
+  if (data.skelArms) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelArms}%`, box: BOX_SKEL_ARMS, initialFontSize: 12.0, color: '#001a70' });
+  if (data.skelTrunk) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelTrunk}%`, box: BOX_SKEL_TRUNK, initialFontSize: 12.0, color: '#001a70' });
+  if (data.skelLegs) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelLegs}%`, box: BOX_SKEL_LEGS, initialFontSize: 12.0, color: '#001a70' });
 
-  // Body Measurements (Exact centering in measurement boxes between lines)
-  if (data.measArms) drawTextCenteredInBox({ ctx: ctx1, text: `${data.measArms}"`, box: BOX_MEAS_ARMS, initialFontSize: 11.5, color: '#001a70' });
-  if (data.measWaist) drawTextCenteredInBox({ ctx: ctx1, text: `${data.measWaist}"`, box: BOX_MEAS_WAIST, initialFontSize: 11.5, color: '#001a70' });
-  if (data.measThigh) drawTextCenteredInBox({ ctx: ctx1, text: `${data.measThigh}"`, box: BOX_MEAS_THIGH, initialFontSize: 11.5, color: '#001a70' });
+  // Body Measurements (Exact calibrated baseline in measurement table)
+  if (data.measArms) drawTextAtBaseline({ ctx: ctx1, text: `${data.measArms}"`, x: 445, baselineY: 613.0, initialFontSize: 11.5, color: '#001a70' });
+  if (data.measWaist) drawTextAtBaseline({ ctx: ctx1, text: `${data.measWaist}"`, x: 445, baselineY: 626.5, initialFontSize: 11.5, color: '#001a70' });
+  if (data.measThigh) drawTextAtBaseline({ ctx: ctx1, text: `${data.measThigh}"`, x: 445, baselineY: 640.0, initialFontSize: 11.5, color: '#001a70' });
 
   // QR Code on Page 1
   if (qrDataUrl) {
@@ -860,9 +814,12 @@ export async function generateReportPdf(
   const pages = pdfDoc.getPages();
   const page1 = pages[0];
   const { width: p1W, height: p1H } = page1.getSize();
+  const mediaBox = page1.node.MediaBox();
+  const originX = mediaBox ? (mediaBox.asArray()[0] as any)?.numberValue ?? 0 : 0;
+  const originY = mediaBox ? (mediaBox.asArray()[1] as any)?.numberValue ?? 0 : 0;
   page1.drawImage(overlayPng1, {
-    x: 0,
-    y: 0,
+    x: originX,
+    y: originY,
     width: p1W,
     height: p1H,
   });
