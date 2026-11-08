@@ -20,17 +20,17 @@ export function getBodyFatStatus(val: number, gender: Gender): CategoryStatus {
 
 /**
  * Categorize Visceral Fat % based strictly on BAR.pdf printed references:
- * Male: Normal <= 5%, High = 14% (6-14%), Risk >= 15%
- * Female: Normal <= 7%, High = 16% (8-16%), Risk >= 17%
+ * Male: Normal <= 10%, High = 10.1-14%, Risk > 14% (including >= 15%)
+ * Female: Normal <= 12%, High = 12.1-16%, Risk > 16% (including >= 17%)
  */
 export function getVisceralFatStatus(val: number, gender: Gender): CategoryStatus {
   if (isNaN(val)) return 'Normal';
   if (gender === 'Male') {
-    if (val <= 5.0) return 'Normal';
+    if (val <= 10.0) return 'Normal';
     if (val <= 14.0) return 'High';
     return 'Risk';
   } else {
-    if (val <= 7.0) return 'Normal';
+    if (val <= 12.0) return 'Normal';
     if (val <= 16.0) return 'High';
     return 'Risk';
   }

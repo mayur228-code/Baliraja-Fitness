@@ -267,26 +267,73 @@ export function extractReportDataFromUrl(urlOrSearch?: string): { report: Report
 export const DEFAULT_PUBLIC_APP_URL = 'https://mayur228-code.github.io/Baliraja-Fitness';
 
 /**
+ * Checks if a hostname, origin, or URL is a local, private network, or development address.
+ * Covers: localhost, 127.0.0.1, 0.0.0.0, 10.x.x.x, 192.168.x.x, 172.16-31.x.x,
+ * .local, .internal, .lan, dev ports (:5173, :5180, :3000, :8080), capacitor://, file://
+ */
+export function isPrivateOrDevUrl(urlOrOrigin?: string): boolean {
+  if (!urlOrOrigin || typeof urlOrOrigin !== 'string') return true;
+  const trimmed = urlOrOrigin.trim().toLowerCase();
+  if (
+    trimmed.startsWith('capacitor://') ||
+    trimmed.startsWith('file://') ||
+    trimmed.startsWith('content://')
+  ) {
+    return true;
+  }
+
+  try {
+    const parsed = new URL(trimmed.startsWith('http') ? trimmed : `http://${trimmed}`);
+    const host = parsed.hostname.toLowerCase();
+
+    // Loopback
+    if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1') {
+      return true;
+    }
+    // Private IPv4 ranges (RFC 1918 & RFC 3927 link-local)
+    if (
+      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^169\.254\.\d{1,3}\.\d{1,3}$/.test(host)
+    ) {
+      return true;
+    }
+    // Local domain suffixes
+    if (host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.lan')) {
+      return true;
+    }
+    // Development non-standard HTTP/HTTPS ports (Vite, webpack, etc.)
+    if (parsed.port && parsed.port !== '80' && parsed.port !== '443') {
+      return true;
+    }
+  } catch (e) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Resolves the public, accessible base URL for the application.
  * Hierarchy:
- * 1. Explicit `customBaseUrl` parameter
- * 2. Coach-configured custom share URL in localStorage (`baliraja_custom_share_url`)
- * 3. Environment variables (`VITE_APP_URL` or `VITE_PUBLIC_URL`)
- * 4. Runtime window origin on deployed public web host (non-localhost, with base path)
- * 5. Local development fallback (in DEV mode on desktop/browser)
- * 6. Fallback to `DEFAULT_PUBLIC_APP_URL` (NEVER emit localhost in production / Android APKs)
+ * 1. Explicit `customBaseUrl` parameter (if public)
+ * 2. Coach-configured custom share URL in localStorage (`baliraja_custom_share_url`, if public)
+ * 3. Environment variables (`VITE_APP_URL` or `VITE_PUBLIC_URL`, if public)
+ * 4. Runtime window origin on deployed public web host (non-private/non-dev, with base path)
+ * 5. Fallback to `DEFAULT_PUBLIC_APP_URL` (NEVER emit localhost or private LAN IPs in reports)
  */
 export function getAppBaseUrl(customBaseUrl?: string): string {
-  // 1. Explicit parameter override
-  if (customBaseUrl && customBaseUrl.trim()) {
+  // 1. Explicit parameter override (if valid public URL)
+  if (customBaseUrl && customBaseUrl.trim() && !isPrivateOrDevUrl(customBaseUrl)) {
     return customBaseUrl.trim().replace(/\/$/, '');
   }
 
-  // 2. Custom URL saved in localStorage
+  // 2. Custom URL saved in localStorage (if valid public URL)
   if (typeof window !== 'undefined' && window.localStorage) {
     try {
       const savedCustom = localStorage.getItem('baliraja_custom_share_url');
-      if (savedCustom && savedCustom.trim()) {
+      if (savedCustom && savedCustom.trim() && !isPrivateOrDevUrl(savedCustom)) {
         return savedCustom.trim().replace(/\/$/, '');
       }
     } catch (e) {
@@ -294,25 +341,19 @@ export function getAppBaseUrl(customBaseUrl?: string): string {
     }
   }
 
-  // 3. Environment variable if configured
+  // 3. Environment variable if configured with a public URL
   const metaEnv = typeof import.meta !== 'undefined' ? (import.meta as any).env : undefined;
-  if (metaEnv?.VITE_APP_URL && typeof metaEnv.VITE_APP_URL === 'string' && metaEnv.VITE_APP_URL.trim()) {
+  if (metaEnv?.VITE_APP_URL && typeof metaEnv.VITE_APP_URL === 'string' && !isPrivateOrDevUrl(metaEnv.VITE_APP_URL)) {
     return metaEnv.VITE_APP_URL.trim().replace(/\/$/, '');
   }
-  if (metaEnv?.VITE_PUBLIC_URL && typeof metaEnv.VITE_PUBLIC_URL === 'string' && metaEnv.VITE_PUBLIC_URL.trim()) {
+  if (metaEnv?.VITE_PUBLIC_URL && typeof metaEnv.VITE_PUBLIC_URL === 'string' && !isPrivateOrDevUrl(metaEnv.VITE_PUBLIC_URL)) {
     return metaEnv.VITE_PUBLIC_URL.trim().replace(/\/$/, '');
   }
 
-  // 4. Runtime browser origin on a deployed public website (GitHub Pages, Vercel, Netlify, custom domain)
+  // 4. Runtime browser origin on a deployed public website (GitHub Pages, custom domain, etc.)
   if (typeof window !== 'undefined' && window.location) {
     const origin = window.location.origin;
-    if (
-      origin &&
-      !origin.includes('localhost') &&
-      !origin.includes('127.0.0.1') &&
-      !origin.startsWith('capacitor://') &&
-      !origin.startsWith('file://')
-    ) {
+    if (origin && !isPrivateOrDevUrl(origin)) {
       const basePath = metaEnv?.BASE_URL && metaEnv.BASE_URL !== '/'
         ? metaEnv.BASE_URL.replace(/\/$/, '')
         : '';
@@ -320,12 +361,7 @@ export function getAppBaseUrl(customBaseUrl?: string): string {
     }
   }
 
-  // 5. Local development fallback (in DEV mode on browser)
-  if (metaEnv?.DEV && typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin.replace(/\/$/, '');
-  }
-
-  // 6. Default public fallback for Android native app and production builds
+  // 5. Default public fallback for Android native app and production builds (NEVER private/local)
   return DEFAULT_PUBLIC_APP_URL;
 }
 

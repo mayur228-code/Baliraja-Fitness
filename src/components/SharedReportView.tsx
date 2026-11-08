@@ -3,7 +3,7 @@ import { ReportData } from '../types';
 import { generateReportPdf } from '../utils/pdfGenerator';
 import { getRecommendations } from '../utils/recommendations';
 import { getReportKeyMetrics } from '../utils/metricSummary';
-import { getReportShareUrl } from '../utils/qrPayload';
+import { getReportShareUrl, isPrivateOrDevUrl } from '../utils/qrPayload';
 import { SuggestionsSection } from './SuggestionsSection';
 import { savePdfToDevice, sharePdfFile, getSafePdfFileName } from '../utils/nativePdfHandler';
 import {
@@ -37,11 +37,8 @@ export const SharedReportView: React.FC<SharedReportViewProps> = ({ data }) => {
   const handleDownload = async () => {
     try {
       setDownloading(true);
-      const isPublicOrigin = typeof window !== 'undefined' &&
-        !window.location.origin.includes('localhost') &&
-        !window.location.origin.includes('127.0.0.1') &&
-        !window.location.origin.startsWith('capacitor://');
-      const shareUrl = isPublicOrigin ? window.location.href : getReportShareUrl(data);
+      const isPublic = typeof window !== 'undefined' && !isPrivateOrDevUrl(window.location.href);
+      const shareUrl = isPublic ? window.location.href : getReportShareUrl(data);
       const { pdfBlob } = await generateReportPdf(data, shareUrl);
       const res = await savePdfToDevice(pdfBlob, fileName);
       showFeedback('success', res.message);

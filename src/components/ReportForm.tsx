@@ -458,8 +458,8 @@ export const ReportForm: React.FC<ReportFormProps> = ({
             </div>
             <p className="text-[11px] text-slate-500 leading-tight">
               {data.gender === 'Male'
-                ? 'पुरुष संदर्भ: Normal ≤ 5% | High: 14% | Risk ≥ 15%'
-                : 'स्त्री संदर्भ: Normal ≤ 7% | High: 16% | Risk ≥ 17%'}
+                ? 'पुरुष संदर्भ: Normal ≤ 10% | High: 14% | Risk ≥ 15%'
+                : 'स्त्री संदर्भ: Normal ≤ 12% | High: 16% | Risk ≥ 17%'}
             </p>
           </div>
 

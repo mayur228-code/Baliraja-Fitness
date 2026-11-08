@@ -3,12 +3,12 @@ import QRCode from 'qrcode';
 import { ReportData } from '../types';
 import { getBodyFatStatus, getVisceralFatStatus, getBmiStatus } from './calculations';
 import { getRecommendations, ProductItem } from './recommendations';
-import { getReportShareUrl } from './qrPayload';
+import { getReportShareUrl, isPrivateOrDevUrl } from './qrPayload';
 import { resolveAssetUrl } from './assetPath';
 
-// A4 dimensions in points
-const PDF_WIDTH_PT = 595.5;
-const PDF_HEIGHT_PT = 842.25;
+// Template BAR.pdf dimensions in points (559.0 pt x 785.0 pt)
+const PDF_WIDTH_PT = 559.0;
+const PDF_HEIGHT_PT = 785.0;
 
 // Render scale for crystal clear typography on A4
 const DPI_SCALE = 2.5;
@@ -258,28 +258,28 @@ export function drawTextAtBaseline(options: DrawTextAtBaselineOptions): void {
   ctx.fillText(text, x, baselineY);
 }
 
-// 17 Template Comparison Box Rectangles (Calibrated with exact geometry from BAR.pdf)
-export const BOX_BODY_FAT_NORMAL: BoxRect = { x: 164.2, y: 238.1, width: 46.9, height: 17.9 };
-export const BOX_BODY_FAT_HIGH: BoxRect = { x: 250.6, y: 229.1, width: 46.9, height: 17.9 };
-export const BOX_BODY_FAT_RISK: BoxRect = { x: 341.2, y: 229.1, width: 46.9, height: 17.9 };
+// 17 Template Comparison Box Rectangles (Calibrated with exact vector geometry from new BAR.pdf)
+export const BOX_BODY_FAT_NORMAL: BoxRect = { x: 154.67, y: 217.73, width: 43.26, height: 16.31 };
+export const BOX_BODY_FAT_HIGH: BoxRect = { x: 235.80, y: 209.33, width: 43.26, height: 16.31 };
+export const BOX_BODY_FAT_RISK: BoxRect = { x: 320.91, y: 209.33, width: 43.26, height: 16.31 };
 
-export const BOX_VISCERAL_NORMAL: BoxRect = { x: 164.2, y: 313.3, width: 46.9, height: 17.9 };
-export const BOX_VISCERAL_HIGH: BoxRect = { x: 250.6, y: 304.3, width: 46.9, height: 17.9 };
-export const BOX_VISCERAL_RISK: BoxRect = { x: 341.0, y: 304.3, width: 46.9, height: 17.9 };
+export const BOX_VISCERAL_NORMAL: BoxRect = { x: 154.67, y: 288.39, width: 43.26, height: 16.31 };
+export const BOX_VISCERAL_HIGH: BoxRect = { x: 235.80, y: 279.99, width: 43.26, height: 16.31 };
+export const BOX_VISCERAL_RISK: BoxRect = { x: 320.78, y: 279.99, width: 43.26, height: 16.31 };
 
-export const BOX_BMI_NORMAL: BoxRect = { x: 164.2, y: 421.1, width: 46.9, height: 17.9 };
-export const BOX_BMI_HIGH: BoxRect = { x: 250.8, y: 411.7, width: 46.9, height: 17.9 };
-export const BOX_BMI_RISK: BoxRect = { x: 339.2, y: 411.7, width: 46.9, height: 17.9 };
+export const BOX_BMI_NORMAL: BoxRect = { x: 154.67, y: 389.71, width: 43.26, height: 16.31 };
+export const BOX_BMI_HIGH: BoxRect = { x: 235.98, y: 380.86, width: 43.26, height: 16.31 };
+export const BOX_BMI_RISK: BoxRect = { x: 319.02, y: 380.86, width: 43.26, height: 16.31 };
 
-export const BOX_SUB_WHOLE: BoxRect = { x: 66.1, y: 563.7, width: 46.9, height: 17.9 };
-export const BOX_SUB_ARMS: BoxRect = { x: 164.2, y: 555.3, width: 46.9, height: 17.9 };
-export const BOX_SUB_TRUNK: BoxRect = { x: 253.5, y: 555.0, width: 46.9, height: 17.9 };
-export const BOX_SUB_LEGS: BoxRect = { x: 339.2, y: 554.8, width: 46.9, height: 17.9 };
+export const BOX_SUB_WHOLE: BoxRect = { x: 62.43, y: 523.69, width: 43.26, height: 16.31 };
+export const BOX_SUB_ARMS: BoxRect = { x: 154.67, y: 515.83, width: 43.26, height: 16.31 };
+export const BOX_SUB_TRUNK: BoxRect = { x: 238.53, y: 515.47, width: 43.26, height: 16.31 };
+export const BOX_SUB_LEGS: BoxRect = { x: 319.02, y: 515.28, width: 43.26, height: 16.31 };
 
-export const BOX_SKEL_WHOLE: BoxRect = { x: 64.4, y: 635.4, width: 46.9, height: 17.9 };
-export const BOX_SKEL_ARMS: BoxRect = { x: 164.2, y: 629.7, width: 46.9, height: 17.9 };
-export const BOX_SKEL_TRUNK: BoxRect = { x: 253.5, y: 629.1, width: 46.9, height: 17.9 };
-export const BOX_SKEL_LEGS: BoxRect = { x: 339.2, y: 629.7, width: 46.9, height: 17.9 };
+export const BOX_SKEL_WHOLE: BoxRect = { x: 60.91, y: 591.03, width: 43.26, height: 16.31 };
+export const BOX_SKEL_ARMS: BoxRect = { x: 154.67, y: 585.67, width: 43.26, height: 16.31 };
+export const BOX_SKEL_TRUNK: BoxRect = { x: 238.53, y: 585.15, width: 43.26, height: 16.31 };
+export const BOX_SKEL_LEGS: BoxRect = { x: 319.02, y: 585.67, width: 43.26, height: 16.31 };
 
 /**
  * Generate full 2-page PDF with high performance:
@@ -302,13 +302,16 @@ export async function generateReportPdf(
 
   // 1. Fetch template & generate QR in parallel
   const templatePromise = getTemplateArrayBuffer();
-  const urlToEncode = shareUrl || getReportShareUrl(data);
+  // Ensure the embedded QR code ALWAYS points to a valid public URL (never private IP, localhost, or dev server)
+  const validShareUrl = shareUrl && !isPrivateOrDevUrl(shareUrl) ? shareUrl : getReportShareUrl(data);
+  const urlToEncode = validShareUrl;
   const qrPromise = urlToEncode
     ? QRCode.toDataURL(urlToEncode, {
-        width: 180,
+        width: 500,
         margin: 1,
+        errorCorrectionLevel: 'M',
         color: {
-          dark: '#001a70',
+          dark: '#000000',
           light: '#ffffff',
         },
       })
@@ -326,34 +329,34 @@ export async function generateReportPdf(
   }
   ctx1.scale(DPI_SCALE, DPI_SCALE);
 
-  // Header Fields (Personal Details - Exact baseline positioning above printed lines)
+  // Header Fields (Personal Details - Exact baseline positioning above printed lines on new BAR.pdf)
   drawTextAtBaseline({
     ctx: ctx1,
     text: data.name,
-    x: 80,
-    baselineY: 78.5,
-    initialFontSize: 12.5,
-    maxWidth: 225,
+    x: 76,
+    baselineY: 67.5,
+    initialFontSize: 12.0,
+    maxWidth: 210,
     color: '#001a70',
   });
 
   drawTextAtBaseline({
     ctx: ctx1,
     text: data.mobile,
-    x: 395,
-    baselineY: 89.0,
-    initialFontSize: 12.5,
-    maxWidth: 114,
+    x: 372,
+    baselineY: 77.5,
+    initialFontSize: 12.0,
+    maxWidth: 95,
     color: '#001a70',
   });
 
   drawTextAtBaseline({
     ctx: ctx1,
     text: data.village,
-    x: 80,
-    baselineY: 102.0,
-    initialFontSize: 12.0,
-    maxWidth: 150,
+    x: 76,
+    baselineY: 89.8,
+    initialFontSize: 11.5,
+    maxWidth: 140,
     color: '#001a70',
   });
 
@@ -363,10 +366,10 @@ export async function generateReportPdf(
   drawTextAtBaseline({
     ctx: ctx1,
     text: ageGenderText,
-    x: 272,
-    baselineY: 112.5,
-    initialFontSize: 11.5,
-    maxWidth: 52,
+    x: 256,
+    baselineY: 99.8,
+    initialFontSize: 11.0,
+    maxWidth: 46,
     color: '#001a70',
   });
 
@@ -374,24 +377,24 @@ export async function generateReportPdf(
   drawTextAtBaseline({
     ctx: ctx1,
     text: heightText,
-    x: 354,
-    baselineY: 112.0,
-    initialFontSize: 11.5,
-    maxWidth: 50,
+    x: 334,
+    baselineY: 99.0,
+    initialFontSize: 11.0,
+    maxWidth: 46,
     color: '#001a70',
   });
 
   drawTextAtBaseline({
     ctx: ctx1,
     text: data.date,
-    x: 452,
-    baselineY: 111.5,
-    initialFontSize: 11.5,
-    maxWidth: 74,
+    x: 424,
+    baselineY: 98.6,
+    initialFontSize: 11.0,
+    maxWidth: 68,
     color: '#001a70',
   });
 
-  // Weight Row (Exact calibrated baseline Y = 163.0 inside weight boxes)
+  // Weight Row (Exact calibrated baseline Y = 143.2 inside weight boxes)
   const weightVal = data.weight ? `${data.weight} kg` : '';
   const idealVal = data.idealWeight ? `${data.idealWeight} kg` : '';
   const extraVal = data.extraWeight || '-';
@@ -400,40 +403,44 @@ export async function generateReportPdf(
   drawTextAtBaseline({
     ctx: ctx1,
     text: weightVal,
-    x: 92,
-    baselineY: 163.0,
-    initialFontSize: 13.0,
+    x: 118,
+    baselineY: 143.2,
+    initialFontSize: 12.5,
     fontFamily: "'Arial', sans-serif",
+    align: 'center',
     color: '#001a70',
   });
 
   drawTextAtBaseline({
     ctx: ctx1,
     text: idealVal,
-    x: 262,
-    baselineY: 163.0,
-    initialFontSize: 13.0,
+    x: 272,
+    baselineY: 143.2,
+    initialFontSize: 12.5,
     fontFamily: "'Arial', sans-serif",
+    align: 'center',
     color: '#001a70',
   });
 
   drawTextAtBaseline({
     ctx: ctx1,
     text: extraVal,
-    x: 376,
-    baselineY: 163.0,
-    initialFontSize: 13.0,
+    x: 372,
+    baselineY: 143.2,
+    initialFontSize: 12.5,
     fontFamily: "'Arial', sans-serif",
+    align: 'center',
     color: extraVal !== '-' ? '#b91c1c' : '#001a70',
   });
 
   drawTextAtBaseline({
     ctx: ctx1,
     text: lessVal,
-    x: 486,
-    baselineY: 163.0,
-    initialFontSize: 13.0,
+    x: 485,
+    baselineY: 143.2,
+    initialFontSize: 12.5,
     fontFamily: "'Arial', sans-serif",
+    align: 'center',
     color: lessVal !== '-' ? '#047857' : '#001a70',
   });
 
@@ -446,11 +453,11 @@ export async function generateReportPdf(
     const bfText = `${data.bodyFat}%`;
     const bfStatus = getBodyFatStatus(numBodyFat, data.gender);
     if (bfStatus === 'Normal') {
-      drawTextCenteredInBox({ ctx: ctx1, text: bfText, box: BOX_BODY_FAT_NORMAL, initialFontSize: 12.0, color: '#047857' });
+      drawTextCenteredInBox({ ctx: ctx1, text: bfText, box: BOX_BODY_FAT_NORMAL, initialFontSize: 11.0, color: '#047857' });
     } else if (bfStatus === 'High') {
-      drawTextCenteredInBox({ ctx: ctx1, text: bfText, box: BOX_BODY_FAT_HIGH, initialFontSize: 12.0, color: '#b45309' });
+      drawTextCenteredInBox({ ctx: ctx1, text: bfText, box: BOX_BODY_FAT_HIGH, initialFontSize: 11.0, color: '#b45309' });
     } else if (bfStatus === 'Risk') {
-      drawTextCenteredInBox({ ctx: ctx1, text: bfText, box: BOX_BODY_FAT_RISK, initialFontSize: 12.0, color: '#b91c1c' });
+      drawTextCenteredInBox({ ctx: ctx1, text: bfText, box: BOX_BODY_FAT_RISK, initialFontSize: 11.0, color: '#b91c1c' });
     }
   }
 
@@ -458,11 +465,11 @@ export async function generateReportPdf(
     const vfText = `${data.visceralFat}%`;
     const vfStatus = getVisceralFatStatus(numVisceral, data.gender);
     if (vfStatus === 'Normal') {
-      drawTextCenteredInBox({ ctx: ctx1, text: vfText, box: BOX_VISCERAL_NORMAL, initialFontSize: 12.0, color: '#047857' });
+      drawTextCenteredInBox({ ctx: ctx1, text: vfText, box: BOX_VISCERAL_NORMAL, initialFontSize: 11.0, color: '#047857' });
     } else if (vfStatus === 'High') {
-      drawTextCenteredInBox({ ctx: ctx1, text: vfText, box: BOX_VISCERAL_HIGH, initialFontSize: 12.0, color: '#b45309' });
+      drawTextCenteredInBox({ ctx: ctx1, text: vfText, box: BOX_VISCERAL_HIGH, initialFontSize: 11.0, color: '#b45309' });
     } else if (vfStatus === 'Risk') {
-      drawTextCenteredInBox({ ctx: ctx1, text: vfText, box: BOX_VISCERAL_RISK, initialFontSize: 12.0, color: '#b91c1c' });
+      drawTextCenteredInBox({ ctx: ctx1, text: vfText, box: BOX_VISCERAL_RISK, initialFontSize: 11.0, color: '#b91c1c' });
     }
   }
 
@@ -470,10 +477,11 @@ export async function generateReportPdf(
     drawTextAtBaseline({
       ctx: ctx1,
       text: `${data.restingMetabolism} kcal`,
-      x: 255,
-      baselineY: 374.0,
-      initialFontSize: 12.5,
+      x: 302.5,
+      baselineY: 343.5,
+      initialFontSize: 12.0,
       fontFamily: "'Arial', sans-serif",
+      align: 'center',
       color: '#001a70',
     });
   }
@@ -482,11 +490,11 @@ export async function generateReportPdf(
     const bmiText = `${data.bmi}`;
     const bmiStatus = getBmiStatus(numBmi, data.gender);
     if (bmiStatus === 'Normal') {
-      drawTextCenteredInBox({ ctx: ctx1, text: bmiText, box: BOX_BMI_NORMAL, initialFontSize: 12.0, color: '#047857' });
+      drawTextCenteredInBox({ ctx: ctx1, text: bmiText, box: BOX_BMI_NORMAL, initialFontSize: 11.0, color: '#047857' });
     } else if (bmiStatus === 'High') {
-      drawTextCenteredInBox({ ctx: ctx1, text: bmiText, box: BOX_BMI_HIGH, initialFontSize: 12.0, color: '#b45309' });
+      drawTextCenteredInBox({ ctx: ctx1, text: bmiText, box: BOX_BMI_HIGH, initialFontSize: 11.0, color: '#b45309' });
     } else if (bmiStatus === 'Risk') {
-      drawTextCenteredInBox({ ctx: ctx1, text: bmiText, box: BOX_BMI_RISK, initialFontSize: 12.0, color: '#b91c1c' });
+      drawTextCenteredInBox({ ctx: ctx1, text: bmiText, box: BOX_BMI_RISK, initialFontSize: 11.0, color: '#b91c1c' });
     }
   }
 
@@ -494,45 +502,39 @@ export async function generateReportPdf(
     drawTextAtBaseline({
       ctx: ctx1,
       text: `${data.bodyAge} वर्षे`,
-      x: 318,
-      baselineY: 474.0,
-      initialFontSize: 12.0,
+      x: 337.3,
+      baselineY: 440.6,
+      initialFontSize: 11.5,
+      align: 'center',
       color: '#001a70',
     });
   }
 
   // Regional Subcutaneous Fat
-  if (data.subWhole) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subWhole}%`, box: BOX_SUB_WHOLE, initialFontSize: 12.0, color: '#001a70' });
-  if (data.subArms) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subArms}%`, box: BOX_SUB_ARMS, initialFontSize: 12.0, color: '#001a70' });
-  if (data.subTrunk) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subTrunk}%`, box: BOX_SUB_TRUNK, initialFontSize: 12.0, color: '#001a70' });
-  if (data.subLegs) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subLegs}%`, box: BOX_SUB_LEGS, initialFontSize: 12.0, color: '#001a70' });
+  if (data.subWhole) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subWhole}%`, box: BOX_SUB_WHOLE, initialFontSize: 11.0, color: '#001a70' });
+  if (data.subArms) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subArms}%`, box: BOX_SUB_ARMS, initialFontSize: 11.0, color: '#001a70' });
+  if (data.subTrunk) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subTrunk}%`, box: BOX_SUB_TRUNK, initialFontSize: 11.0, color: '#001a70' });
+  if (data.subLegs) drawTextCenteredInBox({ ctx: ctx1, text: `${data.subLegs}%`, box: BOX_SUB_LEGS, initialFontSize: 11.0, color: '#001a70' });
 
   // Regional Skeletal Muscle
-  if (data.skelWhole) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelWhole}%`, box: BOX_SKEL_WHOLE, initialFontSize: 12.0, color: '#001a70' });
-  if (data.skelArms) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelArms}%`, box: BOX_SKEL_ARMS, initialFontSize: 12.0, color: '#001a70' });
-  if (data.skelTrunk) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelTrunk}%`, box: BOX_SKEL_TRUNK, initialFontSize: 12.0, color: '#001a70' });
-  if (data.skelLegs) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelLegs}%`, box: BOX_SKEL_LEGS, initialFontSize: 12.0, color: '#001a70' });
+  if (data.skelWhole) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelWhole}%`, box: BOX_SKEL_WHOLE, initialFontSize: 11.0, color: '#001a70' });
+  if (data.skelArms) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelArms}%`, box: BOX_SKEL_ARMS, initialFontSize: 11.0, color: '#001a70' });
+  if (data.skelTrunk) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelTrunk}%`, box: BOX_SKEL_TRUNK, initialFontSize: 11.0, color: '#001a70' });
+  if (data.skelLegs) drawTextCenteredInBox({ ctx: ctx1, text: `${data.skelLegs}%`, box: BOX_SKEL_LEGS, initialFontSize: 11.0, color: '#001a70' });
 
   // Body Measurements (Exact calibrated baseline in measurement table)
-  if (data.measArms) drawTextAtBaseline({ ctx: ctx1, text: `${data.measArms}"`, x: 445, baselineY: 613.0, initialFontSize: 11.5, color: '#001a70' });
-  if (data.measWaist) drawTextAtBaseline({ ctx: ctx1, text: `${data.measWaist}"`, x: 445, baselineY: 626.5, initialFontSize: 11.5, color: '#001a70' });
-  if (data.measThigh) drawTextAtBaseline({ ctx: ctx1, text: `${data.measThigh}"`, x: 445, baselineY: 640.0, initialFontSize: 11.5, color: '#001a70' });
+  if (data.measArms) drawTextAtBaseline({ ctx: ctx1, text: `${data.measArms}"`, x: 431.5, baselineY: 570.3, initialFontSize: 11.0, align: 'center', color: '#001a70' });
+  if (data.measWaist) drawTextAtBaseline({ ctx: ctx1, text: `${data.measWaist}"`, x: 431.5, baselineY: 583.0, initialFontSize: 11.0, align: 'center', color: '#001a70' });
+  if (data.measThigh) drawTextAtBaseline({ ctx: ctx1, text: `${data.measThigh}"`, x: 433.0, baselineY: 595.8, initialFontSize: 11.0, align: 'center', color: '#001a70' });
 
-  // QR Code on Page 1
+  // QR Code container box on Page 1 (Designated Top-Right clean area on new template)
   if (qrDataUrl) {
-    const qrImg = new Image();
-    await new Promise((resolve) => {
-      qrImg.onload = resolve;
-      qrImg.src = qrDataUrl;
-    });
-
     ctx1.save();
     ctx1.fillStyle = '#ffffff';
-    ctx1.fillRect(504, 32, 62, 62);
-    ctx1.strokeStyle = '#e2e8f0';
+    ctx1.fillRect(474, 22, 56, 56);
+    ctx1.strokeStyle = '#001a70';
     ctx1.lineWidth = 1;
-    ctx1.strokeRect(504, 32, 62, 62);
-    ctx1.drawImage(qrImg, 506, 34, 58, 58);
+    ctx1.strokeRect(474, 22, 56, 56);
     ctx1.restore();
   }
 
@@ -553,16 +555,16 @@ export async function generateReportPdf(
   ctx2.fillStyle = '#ffffff';
   ctx2.fillRect(0, 0, PDF_WIDTH_PT, PDF_HEIGHT_PT);
 
-  // Outer Page Border (3pt solid black matching Page 1)
+  // Outer Page Border (3pt solid black matching Page 1 on new BAR.pdf)
   ctx2.strokeStyle = '#000000';
   ctx2.lineWidth = 2.5;
-  ctx2.strokeRect(26.6, 27.3, 543.1, 784.6);
+  ctx2.strokeRect(24.97, 19.41, 510.28, 737.16);
 
   // A. Page 2 Top Header Banner
   ctx2.save();
-  const headerX = 140;
-  const headerY = 38;
-  const headerW = 315;
+  const headerX = 126;
+  const headerY = 24;
+  const headerW = 308;
   const headerH = 34;
   const headerR = 17;
 
@@ -574,24 +576,24 @@ export async function generateReportPdf(
   ctx2.fillStyle = '#ffffff';
   ctx2.textAlign = 'center';
   ctx2.textBaseline = 'middle';
-  ctx2.font = 'bold 15px "Noto Sans Devanagari", "Mukta", "Arial", sans-serif';
+  ctx2.font = 'bold 14px "Noto Sans Devanagari", "Mukta", "Arial", sans-serif';
   ctx2.fillText('सल्ले व पोषण मार्गदर्शन (SUGGESTIONS)', headerX + headerW / 2, headerY + headerH / 2);
   ctx2.restore();
 
   // Client Summary Sub-bar
   ctx2.fillStyle = '#f8fafc';
-  ctx2.fillRect(35, 82, 525, 26);
+  ctx2.fillRect(31, 65, 498, 22);
   ctx2.strokeStyle = '#cbd5e1';
   ctx2.lineWidth = 0.8;
-  ctx2.strokeRect(35, 82, 525, 26);
+  ctx2.strokeRect(31, 65, 498, 22);
 
   ctx2.fillStyle = '#0f172a';
-  ctx2.font = 'bold 9.5px "Noto Sans Devanagari", "Mukta", "Arial", sans-serif';
+  ctx2.font = 'bold 9.0px "Noto Sans Devanagari", "Mukta", "Arial", sans-serif';
   ctx2.textAlign = 'left';
   ctx2.textBaseline = 'middle';
 
   const clientInfoText = `नाव: ${data.name || '-'}  |  वय: ${data.age || '-'} (${data.gender === 'Male' ? 'पुरुष' : 'स्त्री'})  |  वजन: ${data.weight ? data.weight + ' kg' : '-'}  |  BMI: ${data.bmi || '-'}  |  दिनांक: ${data.date || '-'}`;
-  ctx2.fillText(clientInfoText, 44, 95);
+  ctx2.fillText(clientInfoText, 38, 76);
 
   // B. Render Sections
   interface RenderSection {
@@ -632,27 +634,27 @@ export async function generateReportPdf(
     totalRows += Math.ceil(sec.products.length / 3);
   }
 
-  let imgMaxHeight = 65;
-  let rowHeight = 112;
-  let sectionGap = 16;
+  let imgMaxHeight = 60;
+  let rowHeight = 104;
+  let sectionGap = 14;
 
   if (totalRows <= 3) {
-    imgMaxHeight = 75;
-    rowHeight = 132;
-    sectionGap = 22;
+    imgMaxHeight = 70;
+    rowHeight = 120;
+    sectionGap = 18;
   } else if (totalRows === 4) {
-    imgMaxHeight = 62;
-    rowHeight = 110;
-    sectionGap = 14;
+    imgMaxHeight = 58;
+    rowHeight = 102;
+    sectionGap = 12;
   } else if (totalRows >= 5) {
-    imgMaxHeight = 52;
-    rowHeight = 96;
-    sectionGap = 10;
+    imgMaxHeight = 48;
+    rowHeight = 90;
+    sectionGap = 8;
   }
 
-  let currentY = 118;
-  const colWidth = 175; // 3 columns across 525 pt width
-  const startX = 35;
+  let currentY = 93;
+  const colWidth = 166; // 3 columns across 498 pt width
+  const startX = 31;
 
   const wrapText = (text: string, maxWidth: number, fontSize: number): string[] => {
     ctx2.font = `bold ${fontSize}px "Noto Sans Devanagari", "Mukta", "Arial", sans-serif`;
@@ -678,21 +680,21 @@ export async function generateReportPdf(
     ctx2.save();
     ctx2.fillStyle = '#f1f5f9';
     ctx2.beginPath();
-    ctx2.roundRect(35, currentY, 525, 20, 4);
+    ctx2.roundRect(31, currentY, 498, 18, 4);
     ctx2.fill();
 
     // Accent line on left of section header
     ctx2.fillStyle = sec.badgeColor;
-    ctx2.fillRect(35, currentY, 4, 20);
+    ctx2.fillRect(31, currentY, 4, 18);
 
     ctx2.fillStyle = '#0f172a';
-    ctx2.font = 'bold 10px "Noto Sans Devanagari", "Mukta", "Arial", sans-serif';
+    ctx2.font = 'bold 9.5px "Noto Sans Devanagari", "Mukta", "Arial", sans-serif';
     ctx2.textAlign = 'left';
     ctx2.textBaseline = 'middle';
-    ctx2.fillText(`${sec.titleMarathi} (${sec.titleEnglish})`, 46, currentY + 10);
+    ctx2.fillText(`${sec.titleMarathi} (${sec.titleEnglish})`, 42, currentY + 9);
     ctx2.restore();
 
-    currentY += 25;
+    currentY += 22;
 
     // Render Products in 3-column rows
     const prods = sec.products;
@@ -788,7 +790,7 @@ export async function generateReportPdf(
   // C. Page 2 Footer: EXACT SAME FOOTER AS PAGE 1 (source/reference: public/footer_exact.png from BAR.pdf)
   try {
     const footerImg = await loadImage('/footer_exact.png');
-    ctx2.drawImage(footerImg, 26.6, 657.0, 543.1, 154.9);
+    ctx2.drawImage(footerImg, 24.97, 611.21, 510.28, 145.36);
   } catch (err) {
     console.warn('[pdfGenerator] Could not load footer_exact.png:', err);
   }
@@ -813,16 +815,42 @@ export async function generateReportPdf(
   // Page 1
   const pages = pdfDoc.getPages();
   const page1 = pages[0];
-  const { width: p1W, height: p1H } = page1.getSize();
-  const mediaBox = page1.node.MediaBox();
-  const originX = mediaBox ? (mediaBox.asArray()[0] as any)?.numberValue ?? 0 : 0;
-  const originY = mediaBox ? (mediaBox.asArray()[1] as any)?.numberValue ?? 0 : 0;
+  page1.setMediaBox(0, 7, PDF_WIDTH_PT, PDF_HEIGHT_PT);
+  page1.setCropBox(0, 7, PDF_WIDTH_PT, PDF_HEIGHT_PT);
   page1.drawImage(overlayPng1, {
-    x: originX,
-    y: originY,
-    width: p1W,
-    height: p1H,
+    x: 0,
+    y: 7,
+    width: PDF_WIDTH_PT,
+    height: PDF_HEIGHT_PT,
   });
+
+  // Direct high-resolution QR code embedding onto Page 1 (crystal clear, vector-sharp)
+  if (qrDataUrl) {
+    try {
+      const qrBase64 = qrDataUrl.split(',')[1] || '';
+      let qrBytes: Uint8Array;
+      if (typeof window !== 'undefined' && typeof window.atob === 'function') {
+        const binary = window.atob(qrBase64);
+        qrBytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          qrBytes[i] = binary.charCodeAt(i);
+        }
+      } else {
+        qrBytes = new Uint8Array(Buffer.from(qrBase64, 'base64'));
+      }
+      const qrEmbed = await pdfDoc.embedPng(qrBytes);
+      // Coordinate transform: In PDF bottom-left system, page origin is (0, 7), height is 785
+      // Canvas: Top Y = 24, Height = 52 => PDF bottom Y = PDF_HEIGHT_PT - 24 - 52 + 7 = 716 pt
+      page1.drawImage(qrEmbed, {
+        x: 476,
+        y: PDF_HEIGHT_PT - 24 - 52 + 7,
+        width: 52,
+        height: 52,
+      });
+    } catch (qrErr) {
+      console.warn('[pdfGenerator] Error embedding direct high-res QR code:', qrErr);
+    }
+  }
 
   // Page 2 (Suggestions)
   const page2 = pdfDoc.addPage([PDF_WIDTH_PT, PDF_HEIGHT_PT]);
