@@ -267,6 +267,9 @@ export const BOX_VISCERAL_NORMAL: BoxRect = { x: 164.2, y: 313.3, width: 46.9, h
 export const BOX_VISCERAL_HIGH: BoxRect = { x: 250.6, y: 304.3, width: 46.9, height: 17.9 };
 export const BOX_VISCERAL_RISK: BoxRect = { x: 341.0, y: 304.3, width: 46.9, height: 17.9 };
 
+// Dedicated Body Age Box Geometry (between x=146.0 and x=232.4, y=454.6 and y=488.1)
+export const BOX_BODY_AGE: BoxRect = { x: 146.0, y: 454.6, width: 86.4, height: 33.5 };
+
 export const BOX_BMI_NORMAL: BoxRect = { x: 164.2, y: 421.1, width: 46.9, height: 17.9 };
 export const BOX_BMI_HIGH: BoxRect = { x: 250.8, y: 411.7, width: 46.9, height: 17.9 };
 export const BOX_BMI_RISK: BoxRect = { x: 339.2, y: 411.7, width: 46.9, height: 17.9 };
@@ -493,13 +496,31 @@ export async function generateReportPdf(
     }
   }
 
+  // Dedicated Body Age – शरीरातील पेशीचे वय (Column 2 under comparison boxes)
   if (data.bodyAge) {
+    const bodyAgeText = data.bodyAge.includes('वर्षे') ? data.bodyAge : `${data.bodyAge} वर्षे`;
     drawTextAtBaseline({
       ctx: ctx1,
-      text: `${data.bodyAge} वर्षे`,
+      text: bodyAgeText,
+      x: 188.0,
+      baselineY: 474.0,
+      initialFontSize: 12.0,
+      maxWidth: 80,
+      align: 'center',
+      color: '#001a70',
+    });
+  }
+
+  // Age – शरीराचे सद्याचे वय (Dedicated Age box next to label at x=318)
+  if (data.age) {
+    const ageText = data.age.includes('वर्षे') ? data.age : `${data.age} वर्षे`;
+    drawTextAtBaseline({
+      ctx: ctx1,
+      text: ageText,
       x: 318,
       baselineY: 474.0,
       initialFontSize: 12.0,
+      maxWidth: 90,
       color: '#001a70',
     });
   }
